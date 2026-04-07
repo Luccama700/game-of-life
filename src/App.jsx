@@ -1,12 +1,18 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import "./App.css";
 
-const CELL_SIZE = 18;
+const DEFAULT_CELL_SIZE = 18;
+const MIN_CELL_SIZE = 10;
+const MAX_CELL_SIZE = 34;
 const COLS = 40;
 const ROWS = 30;
 
 const EMPTY = 0;
 const ALIVE = 1;
 const WALL = 2;
+const RULE_COUNTS = Array.from({ length: 9 }, (_, i) => i);
+const DEFAULT_BIRTH_RULES = [3];
+const DEFAULT_SURVIVAL_RULES = [2, 3];
 
 const createGrid = () => Array.from({ length: ROWS }, () => Array(COLS).fill(EMPTY));
 
@@ -21,16 +27,16 @@ function countNeighbors(grid, r, c) {
   return count;
 }
 
-function step(grid) {
+function step(grid, birthRules, survivalRules) {
   const next = grid.map(row => [...row]);
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       if (grid[r][c] === WALL) continue;
       const n = countNeighbors(grid, r, c);
       if (grid[r][c] === ALIVE) {
-        next[r][c] = (n === 2 || n === 3) ? ALIVE : EMPTY;
+        next[r][c] = survivalRules.includes(n) ? ALIVE : EMPTY;
       } else {
-        next[r][c] = n === 3 ? ALIVE : EMPTY;
+        next[r][c] = birthRules.includes(n) ? ALIVE : EMPTY;
       }
     }
   }
@@ -69,29 +75,38 @@ export default function GameOfLife() {
   const [tool, setTool] = useState("cell");
   const [generation, setGeneration] = useState(0);
   const [speed, setSpeed] = useState(120);
-  const [population, setPopulation] = useState(0);
+  const [cellSize, setCellSize] = useState(DEFAULT_CELL_SIZE);
+  const [birthRules, setBirthRules] = useState(DEFAULT_BIRTH_RULES);
+  const [survivalRules, setSurvivalRules] = useState(DEFAULT_SURVIVAL_RULES);
+  const population = useMemo(() => grid.flat().filter(c => c === ALIVE).length, [grid]);
   const runningRef = useRef(running);
   const speedRef = useRef(speed);
+  const birthRulesRef = useRef(birthRules);
+  const survivalRulesRef = useRef(survivalRules);
+  const simulateRef = useRef(null);
   const isPainting = useRef(false);
 
   useEffect(() => { runningRef.current = running; }, [running]);
   useEffect(() => { speedRef.current = speed; }, [speed]);
-  useEffect(() => {
-    setPopulation(grid.flat().filter(c => c === ALIVE).length);
-  }, [grid]);
+  useEffect(() => { birthRulesRef.current = birthRules; }, [birthRules]);
+  useEffect(() => { survivalRulesRef.current = survivalRules; }, [survivalRules]);
 
   const simulate = useCallback(() => {
     if (!runningRef.current) return;
-    setGrid(g => step(g));
+    setGrid(g => step(g, birthRulesRef.current, survivalRulesRef.current));
     setGeneration(g => g + 1);
-    setTimeout(simulate, speedRef.current);
+    setTimeout(() => simulateRef.current?.(), speedRef.current);
   }, []);
+
+  useEffect(() => {
+    simulateRef.current = simulate;
+  }, [simulate]);
 
   const toggleRunning = () => {
     if (!running) {
       runningRef.current = true;
       setRunning(true);
-      setTimeout(simulate, speedRef.current);
+      setTimeout(() => simulateRef.current?.(), speedRef.current);
     } else {
       runningRef.current = false;
       setRunning(false);
@@ -140,7 +155,7 @@ export default function GameOfLife() {
   };
 
   const stepOnce = () => {
-    setGrid(g => step(g));
+    setGrid(g => step(g, birthRules, survivalRules));
     setGeneration(g => g + 1);
   };
 
@@ -164,10 +179,10 @@ export default function GameOfLife() {
     setGeneration(0);
   };
 
-  const getCellColor = (val) => {
-    if (val === ALIVE) return "#c8f56e";
-    if (val === WALL) return "#5a4a6a";
-    return "#1e1830";
+  const getCellClass = (val) => {
+    if (val === ALIVE) return "cell cell--alive";
+    if (val === WALL) return "cell cell--wall";
+    return "cell cell--empty";
   };
 
   const toolsList = [
@@ -176,211 +191,205 @@ export default function GameOfLife() {
     { id: "erase", label: "Erase", icon: "✕" },
   ];
 
+  const toggleRule = (type, count) => {
+    const setRules = type === "birth" ? setBirthRules : setSurvivalRules;
+    setRules(rules => (
+      rules.includes(count)
+        ? rules.filter(rule => rule !== count)
+        : [...rules, count].sort((a, b) => a - b)
+    ));
+  };
+
+  const resetRules = () => {
+    setBirthRules(DEFAULT_BIRTH_RULES);
+    setSurvivalRules(DEFAULT_SURVIVAL_RULES);
+  };
+
+  const rulesLabel = `B${birthRules.join("") || "-"}/S${survivalRules.join("") || "-"}`;
+
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#1a1425",
-      color: "#e0d8ec",
-      fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      padding: "20px 10px",
-      userSelect: "none",
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Space+Grotesk:wght@400;600;700&display=swap');
-        * { box-sizing: border-box; }
-      `}</style>
+    <main className="app-shell">
+      <section className="hero-panel">
+        <div>
+          <p className="eyebrow">Interactive cellular automaton</p>
+          <h1>Game of Life</h1>
+        </div>
+        <div className="stats">
+          <span>Generation <b>{generation}</b></span>
+          <span>Population <b>{population}</b></span>
+        </div>
+      </section>
 
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 6 }}>
-        <h1 style={{
-          fontFamily: "'Space Grotesk', sans-serif",
-          fontSize: 28,
-          fontWeight: 700,
-          color: "#c8f56e",
-          margin: 0,
-          letterSpacing: -1,
-        }}>Game of Life</h1>
-        <span style={{ fontSize: 11, color: "#7a6b8a", fontWeight: 300 }}>Conway's Cellular Automaton</span>
-      </div>
+      <section className="workspace">
+        <aside className="control-panel" aria-label="Game controls">
+          <div className="panel-group">
+            <p className="panel-label">Draw Mode</p>
+            <div className="button-grid">
+              {toolsList.map(t => (
+                <button
+                  key={t.id}
+                  className={`button button--tool ${tool === t.id ? "button--active" : ""}`}
+                  onClick={() => setTool(t.id)}
+                >
+                  <span>{t.icon}</span> {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, fontSize: 11, color: "#9a8aaa" }}>
-        <span>Gen <b style={{ color: "#c8f56e" }}>{generation}</b></span>
-        <span style={{ color: "#3a2f45" }}>│</span>
-        <span>Pop <b style={{ color: "#e8a4f5" }}>{population}</b></span>
-      </div>
+          <div className="panel-group">
+            <p className="panel-label">Presets</p>
+            <div className="button-grid">
+              {Object.entries(PRESETS).map(([key, val]) => (
+                <button key={key} className="button" onClick={() => loadPreset(key)}>
+                  {val.name}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {/* Tools */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", justifyContent: "center" }}>
-        {toolsList.map(t => (
-          <button key={t.id} onClick={() => setTool(t.id)} style={{
-            padding: "6px 14px",
-            borderRadius: 6,
-            border: tool === t.id ? "2px solid #c8f56e" : "2px solid #2e2540",
-            background: tool === t.id ? "#2a2340" : "#1e1830",
-            color: tool === t.id ? "#c8f56e" : "#7a6b8a",
-            fontSize: 12,
-            fontFamily: "inherit",
-            cursor: "pointer",
-            transition: "all 0.15s",
-            fontWeight: tool === t.id ? 600 : 400,
-          }}>
-            {t.icon} {t.label}
-          </button>
-        ))}
+          <div className="panel-group">
+            <p className="panel-label">Simulation</p>
+            <div className="button-grid">
+              <button className={`button button--primary ${running ? "button--danger" : ""}`} onClick={toggleRunning}>
+                {running ? "Pause" : "Play"}
+              </button>
+              <button className="button" onClick={stepOnce} disabled={running}>
+                Step
+              </button>
+              <button className="button" onClick={randomize}>
+                Random
+              </button>
+              <button className="button" onClick={clearCells}>
+                Clear Cells
+              </button>
+              <button className="button button--danger-text" onClick={clearAll}>
+                Reset All
+              </button>
+            </div>
+          </div>
 
-        <div style={{ width: 1, background: "#2e2540", margin: "0 4px" }} />
-
-        {Object.entries(PRESETS).map(([key, val]) => (
-          <button key={key} onClick={() => loadPreset(key)} style={{
-            padding: "6px 12px",
-            borderRadius: 6,
-            border: "2px solid #2e2540",
-            background: "#1e1830",
-            color: "#8a7b9a",
-            fontSize: 11,
-            fontFamily: "inherit",
-            cursor: "pointer",
-            transition: "all 0.15s",
-          }}
-          onMouseEnter={e => { e.target.style.borderColor = "#e8a4f5"; e.target.style.color = "#e8a4f5"; }}
-          onMouseLeave={e => { e.target.style.borderColor = "#2e2540"; e.target.style.color = "#8a7b9a"; }}
-          >
-            {val.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Grid */}
-      <div style={{
-        display: "inline-grid",
-        gridTemplateColumns: `repeat(${COLS}, ${CELL_SIZE}px)`,
-        gridTemplateRows: `repeat(${ROWS}, ${CELL_SIZE}px)`,
-        gap: 1,
-        background: "#231d30",
-        padding: 2,
-        borderRadius: 8,
-        border: "2px solid #2e2540",
-        boxShadow: "0 0 40px rgba(200, 245, 110, 0.04), inset 0 0 60px rgba(0,0,0,0.3)",
-        marginBottom: 14,
-        overflow: "auto",
-        maxWidth: "100%",
-      }}>
-        {grid.map((row, r) =>
-          row.map((cell, c) => (
-            <div
-              key={`${r}-${c}`}
-              onMouseDown={() => handleMouseDown(r, c)}
-              onMouseEnter={() => handleMouseEnter(r, c)}
-              style={{
-                width: CELL_SIZE,
-                height: CELL_SIZE,
-                background: getCellColor(cell),
-                borderRadius: cell === WALL ? 2 : 3,
-                cursor: running ? "default" : "pointer",
-                transition: "background 0.08s",
-                boxShadow: cell === ALIVE
-                  ? "0 0 6px rgba(200, 245, 110, 0.5), inset 0 0 3px rgba(255,255,255,0.2)"
-                  : cell === WALL
-                  ? "inset 0 0 4px rgba(0,0,0,0.5)"
-                  : "none",
-              }}
+          <div className="panel-group">
+            <label className="range-label" htmlFor="speed">
+              <span>Speed</span>
+              <strong>{Math.round(((530 - speed) / 500) * 100)}%</strong>
+            </label>
+            <input
+              id="speed"
+              className="range"
+              type="range"
+              min={30}
+              max={500}
+              value={530 - speed}
+              onChange={e => setSpeed(530 - Number(e.target.value))}
             />
-          ))
-        )}
-      </div>
+          </div>
 
-      {/* Controls */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", justifyContent: "center" }}>
-        <button onClick={toggleRunning} style={{
-          padding: "8px 22px",
-          borderRadius: 6,
-          border: "none",
-          background: running ? "#e85a6e" : "#c8f56e",
-          color: "#1a1425",
-          fontSize: 13,
-          fontWeight: 700,
-          fontFamily: "inherit",
-          cursor: "pointer",
-          letterSpacing: 0.5,
-        }}>
-          {running ? "⏸ Pause" : "▶ Play"}
-        </button>
-        <button onClick={stepOnce} disabled={running} style={{
-          padding: "8px 16px",
-          borderRadius: 6,
-          border: "2px solid #2e2540",
-          background: "#1e1830",
-          color: running ? "#3a3050" : "#c8f56e",
-          fontSize: 13,
-          fontFamily: "inherit",
-          cursor: running ? "not-allowed" : "pointer",
-        }}>
-          Step →
-        </button>
-        <button onClick={randomize} style={{
-          padding: "8px 16px",
-          borderRadius: 6,
-          border: "2px solid #2e2540",
-          background: "#1e1830",
-          color: "#e8a4f5",
-          fontSize: 12,
-          fontFamily: "inherit",
-          cursor: "pointer",
-        }}>
-          Random
-        </button>
-        <button onClick={clearCells} style={{
-          padding: "8px 14px",
-          borderRadius: 6,
-          border: "2px solid #2e2540",
-          background: "#1e1830",
-          color: "#8a7b9a",
-          fontSize: 12,
-          fontFamily: "inherit",
-          cursor: "pointer",
-        }}>
-          Clear Cells
-        </button>
-        <button onClick={clearAll} style={{
-          padding: "8px 14px",
-          borderRadius: 6,
-          border: "2px solid #2e2540",
-          background: "#1e1830",
-          color: "#e85a6e",
-          fontSize: 12,
-          fontFamily: "inherit",
-          cursor: "pointer",
-        }}>
-          Reset All
-        </button>
-      </div>
+          <div className="panel-group">
+            <label className="range-label" htmlFor="zoom">
+              <span>Zoom</span>
+              <strong>{cellSize}px</strong>
+            </label>
+            <input
+              id="zoom"
+              className="range"
+              type="range"
+              min={MIN_CELL_SIZE}
+              max={MAX_CELL_SIZE}
+              value={cellSize}
+              onChange={e => setCellSize(Number(e.target.value))}
+            />
+            <div className="zoom-actions">
+              <button className="button button--compact" onClick={() => setCellSize(size => Math.max(MIN_CELL_SIZE, size - 2))}>
+                -
+              </button>
+              <button className="button button--compact" onClick={() => setCellSize(DEFAULT_CELL_SIZE)}>
+                Reset
+              </button>
+              <button className="button button--compact" onClick={() => setCellSize(size => Math.min(MAX_CELL_SIZE, size + 2))}>
+                +
+              </button>
+            </div>
+          </div>
 
-      {/* Speed */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "#7a6b8a" }}>
-        <span>Slow</span>
-        <input
-          type="range"
-          min={30}
-          max={500}
-          value={530 - speed}
-          onChange={e => setSpeed(530 - Number(e.target.value))}
-          style={{ width: 140, accentColor: "#c8f56e" }}
-        />
-        <span>Fast</span>
-      </div>
+          <div className="panel-group">
+            <div className="rule-heading">
+              <p className="panel-label">Rules</p>
+              <strong>{rulesLabel}</strong>
+            </div>
+            <p className="rule-help">Birth applies to empty cells. Survival applies to living cells.</p>
+            <div className="rule-row">
+              <span>Birth</span>
+              <div className="rule-options">
+                {RULE_COUNTS.map(count => (
+                  <button
+                    key={`birth-${count}`}
+                    className={`rule-toggle ${birthRules.includes(count) ? "rule-toggle--active" : ""}`}
+                    onClick={() => toggleRule("birth", count)}
+                    aria-pressed={birthRules.includes(count)}
+                  >
+                    {count}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rule-row">
+              <span>Survive</span>
+              <div className="rule-options">
+                {RULE_COUNTS.map(count => (
+                  <button
+                    key={`survival-${count}`}
+                    className={`rule-toggle ${survivalRules.includes(count) ? "rule-toggle--active" : ""}`}
+                    onClick={() => toggleRule("survival", count)}
+                    aria-pressed={survivalRules.includes(count)}
+                  >
+                    {count}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button className="button button--compact" onClick={resetRules}>
+              Reset to Conway
+            </button>
+          </div>
 
-      <p style={{
-        marginTop: 16,
-        fontSize: 10,
-        color: "#4a3f5a",
-        textAlign: "center",
-        maxWidth: 500,
-        lineHeight: 1.6,
-      }}>
-        <b>Cell</b> draws living cells · <b>Wall</b> places barriers that block life · <b>Erase</b> removes anything · Walls survive "Clear Cells"
-      </p>
-    </div>
+          <p className="hint">
+            Cell draws living cells. Wall places barriers that block life. Erase removes anything. Walls survive Clear Cells.
+          </p>
+        </aside>
+
+        <section className="board-panel" aria-label="Game board">
+          <div className="board-frame">
+            <div
+              className="grid"
+              style={{
+                gridTemplateColumns: `repeat(${COLS}, ${cellSize}px)`,
+                gridTemplateRows: `repeat(${ROWS}, ${cellSize}px)`,
+              }}
+            >
+              {grid.map((row, r) =>
+                row.map((cell, c) => (
+                  <div
+                    key={`${r}-${c}`}
+                    className={getCellClass(cell)}
+                    onMouseDown={() => handleMouseDown(r, c)}
+                    onMouseEnter={() => handleMouseEnter(r, c)}
+                    style={{
+                      width: cellSize,
+                      height: cellSize,
+                      cursor: running ? "default" : "pointer",
+                    }}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+          <div className="board-footer">
+            <span>{ROWS} x {COLS} grid</span>
+            <span>Zoom {cellSize}px cells</span>
+          </div>
+        </section>
+      </section>
+    </main>
   );
 }
